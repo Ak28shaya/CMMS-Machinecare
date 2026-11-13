@@ -1,11 +1,24 @@
-import { FiBell, FiBox, FiGrid, FiSettings, FiUsers, FiX } from 'react-icons/fi';
+import {
+  FiGrid,
+  FiUsers,
+  FiBriefcase,
+  FiAward,
+  FiCpu,
+  FiBox,
+  FiBell,
+  FiSettings,
+  FiX
+} from 'react-icons/fi';
 
 const menuItems = [
   { label: 'Dashboard', icon: FiGrid },
   { label: 'Employees', icon: FiUsers },
-  { label: 'Machines', icon: FiSettings },
+  { label: 'Department', icon: FiBriefcase },
+  { label: 'Designation', icon: FiAward },
+  { label: 'Machines', icon: FiCpu },
   { label: 'Spare Parts', icon: FiBox },
-  { label: 'Alerts', icon: FiBell }
+  { label: 'Alerts', icon: FiBell },
+  { label: 'Settings', icon: FiSettings }
 ];
 
 function Sidebar({ activeSection, onNavigate, isOpen, onClose }) {

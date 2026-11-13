@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import machineService from '../services/machineService';
 import spareService from '../services/spareService';
+import employeeService from '../services/employeeService';
 import './machines.css';
 
 function Machines() {
@@ -17,7 +18,9 @@ function Machines() {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState('');
   const [spareOptions, setSpareOptions] = useState([]);
+  const [employeeOptions, setEmployeeOptions] = useState([]);
   const [selectedSpareIds, setSelectedSpareIds] = useState([]);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState([]);
   const [loadingSpareOptions, setLoadingSpareOptions] = useState(false);
   const [spareOptionsError, setSpareOptionsError] = useState(false);
 
@@ -30,7 +33,6 @@ function Machines() {
     name: '',
     location: '',
     status: 'Running',
-    handledByInput: ''
   });
 
   // Fetch machines from backend
@@ -77,7 +79,9 @@ function Machines() {
         machine.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         machine.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         machine.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        machine.handledBy?.some((h) => h.toLowerCase().includes(searchTerm.toLowerCase()));
+        machine.assignedEmployees?.some((employee) =>
+          employee?.name?.toLowerCase().includes(searchTerm.toLowerCase())
+        );
 
       const matchesStatus =
         statusFilter === 'ALL' || machine.status === statusFilter;
@@ -97,16 +101,22 @@ function Machines() {
       name: '',
       location: '',
       status: 'Running',
-      handledByInput: ''
     });
     setSpareOptions([]);
+    setEmployeeOptions([]);
     setSelectedSpareIds([]);
+    setSelectedEmployeeIds([]);
     setSpareOptionsError(false);
     setModalError('');
     setIsModalOpen(true);
     setLoadingSpareOptions(true);
     try {
-      setSpareOptions(await spareService.getSpares({ limit: 200 }));
+      const [spares, employees] = await Promise.all([
+        spareService.getSpares({ limit: 200 }),
+        employeeService.getEmployees({ status: 'Active' })
+      ]);
+      setSpareOptions(spares);
+      setEmployeeOptions(employees);
     } catch (err) {
       setSpareOptionsError(true);
       setModalError(err.message || 'Failed to load spare parts.');
@@ -123,18 +133,20 @@ function Machines() {
       name: machine.name || '',
       location: machine.location || '',
       status: machine.status || 'Running',
-      handledByInput: Array.isArray(machine.handledBy) ? machine.handledBy.join(', ') : ''
     });
     setSpareOptions([]);
+    setEmployeeOptions([]);
     setSelectedSpareIds([]);
+    setSelectedEmployeeIds([]);
     setSpareOptionsError(false);
     setModalError('');
     setIsModalOpen(true);
     setLoadingSpareOptions(true);
     try {
-      const [spares, mappings] = await Promise.all([
+      const [spares, mappings, employees] = await Promise.all([
         spareService.getSpares({ limit: 200 }),
-        spareService.getMachineSpares(machine._id)
+        spareService.getMachineSpares(machine._id),
+        employeeService.getEmployees({ status: 'Active' })
       ]);
       const mappedSpares = mappings
         .map((mapping) => mapping.spare)
@@ -143,6 +155,13 @@ function Machines() {
       mappedSpares.forEach((spare) => optionsById.set(String(spare._id), spare));
       setSpareOptions(Array.from(optionsById.values()));
       setSelectedSpareIds(mappedSpares.map((spare) => String(spare._id)));
+      setEmployeeOptions(employees);
+      const activeEmployeeIds = new Set(employees.map((employee) => String(employee._id)));
+      setSelectedEmployeeIds(
+        (machine.assignedEmployees || [])
+          .filter((employee) => employee && activeEmployeeIds.has(String(employee._id)))
+          .map((employee) => String(employee._id))
+      );
     } catch (err) {
       setSpareOptionsError(true);
       setModalError(err.message || 'Failed to load machine spare parts.');
@@ -156,7 +175,9 @@ function Machines() {
     setEditingMachine(null);
     setModalError('');
     setSpareOptions([]);
+    setEmployeeOptions([]);
     setSelectedSpareIds([]);
+    setSelectedEmployeeIds([]);
     setSpareOptionsError(false);
   };
 
@@ -178,14 +199,6 @@ function Machines() {
       return;
     }
 
-    // Process handledBy comma-separated values into an array
-    const handledBy = formData.handledByInput
-      ? formData.handledByInput
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
-
     const payload = {
       code: formData.code.trim().toUpperCase(),
       name: formData.name.trim(),
@@ -193,7 +206,7 @@ function Machines() {
       status: formData.status,
       spares: selectedSpareIds.length,
       spareIds: selectedSpareIds,
-      handledBy
+      assignedEmployees: selectedEmployeeIds
     };
 
     setModalLoading(true);
@@ -520,10 +533,14 @@ function Machines() {
                       {/* Handled By (Technicians) */}
                       <td>
                         <div className="handled-by-cell">
-                          {Array.isArray(machine.handledBy) && machine.handledBy.length > 0 ? (
-                            machine.handledBy.map((tech, idx) => (
-                              <span key={idx} className="tech-chip" title={`Technician: ${tech}`}>
-                                {tech}
+                          {Array.isArray(machine.assignedEmployees) && machine.assignedEmployees.length > 0 ? (
+                            machine.assignedEmployees.filter(Boolean).map((employee) => (
+                              <span
+                                key={employee._id}
+                                className="tech-chip"
+                                title={`${employee.employeeId} - ${employee.designation || 'Employee'}`}
+                              >
+                                {employee.name}
                               </span>
                             ))
                           ) : (
@@ -747,17 +764,27 @@ function Machines() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="m-handledBy">Assigned Technicians</label>
-                <input
-                  id="m-handledBy"
-                  type="text"
-                  name="handledByInput"
-                  placeholder="e.g. Alex Vance, Sarah Connor"
-                  value={formData.handledByInput}
-                  onChange={handleFormChange}
+                <label htmlFor="m-assignedEmployees">Assigned Employees</label>
+                <select
+                  id="m-assignedEmployees"
+                  multiple
+                  value={selectedEmployeeIds}
+                  onChange={(e) =>
+                    setSelectedEmployeeIds(
+                      Array.from(e.target.selectedOptions, (option) => option.value)
+                    )
+                  }
                   disabled={modalLoading}
-                />
-                <small className="field-hint">Separate multiple names with commas</small>
+                >
+                  {employeeOptions.map((employee) => (
+                    <option key={employee._id} value={employee._id}>
+                      {employee.employeeId} - {employee.name} ({employee.designation})
+                    </option>
+                  ))}
+                </select>
+                <small className="field-hint">
+                  Select active employees from the employee records. Use Ctrl/Cmd to select multiple.
+                </small>
               </div>
 
               {/* Modal Actions */}

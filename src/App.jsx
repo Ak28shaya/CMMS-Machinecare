@@ -3,6 +3,11 @@ import Login from './pages/login';
 import Sidebar from './components/sidebar';
 import Machines from './machines/machines';
 import Spares from './spares/spares';
+import Employees from './employee/employee';
+import Department from './department/department';
+import Designation from './designation/designation';
+import Settings from './settings/settings';
+import Alerts from './alerts/alerts';
 import authService from './services/authService';
 import { FiMenu } from 'react-icons/fi';
 import './App.css';
@@ -12,13 +17,13 @@ function App() {
   const [profileData, setProfileData] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState('');
-  const [activeSection, setActiveSection] = useState('Spare Parts');
+  const [activeSection, setActiveSection] = useState('Employees');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
     setProfileData(null);
-    setActiveSection('Spare Parts');
+    setActiveSection('Employees');
     setSidebarOpen(false);
   };
 
@@ -183,13 +188,30 @@ function App() {
 
           {activeSection === 'Spare Parts' && <Spares />}
 
-          {activeSection !== 'Dashboard' && activeSection !== 'Machines' && activeSection !== 'Spare Parts' && (
-            <section className="module-placeholder" aria-live="polite">
-              <p className="section-kicker">WORKSPACE</p>
-              <h1>{activeSection}</h1>
-              <p>This section is ready to be connected to its workspace.</p>
-            </section>
-          )}
+          {activeSection === 'Employees' && <Employees />}
+
+          {activeSection === 'Department' && <Department />}
+
+          {activeSection === 'Designation' && <Designation />}
+
+          {activeSection === 'Settings' && <Settings />}
+
+          {activeSection === 'Alerts' && <Alerts />}
+
+          {activeSection !== 'Dashboard' &&
+            activeSection !== 'Machines' &&
+            activeSection !== 'Spare Parts' &&
+            activeSection !== 'Employees' &&
+            activeSection !== 'Department' &&
+            activeSection !== 'Designation' &&
+            activeSection !== 'Settings' &&
+            activeSection !== 'Alerts' && (
+              <section className="module-placeholder" aria-live="polite">
+                <p className="section-kicker">WORKSPACE</p>
+                <h1>{activeSection}</h1>
+                <p>This section is ready to be connected to its workspace.</p>
+              </section>
+            )}
         </main>
       </div>
     </div>

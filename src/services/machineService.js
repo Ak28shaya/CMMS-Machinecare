@@ -52,7 +52,7 @@ export const machineService = {
 
   /**
    * Create a new machine
-   * @param {Object} machineData - { code, name, location, status, spares, handledBy }
+   * @param {Object} machineData - { code, name, location, status, spareIds, assignedEmployees }
    */
   async createMachine(machineData) {
     const res = await request('', {
