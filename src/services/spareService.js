@@ -153,6 +153,19 @@ export const spareService = {
   },
 
   /**
+   * Fetch maintenance records from the backend
+   */
+  async getMaintenanceHistory(params = {}) {
+    const query = new URLSearchParams();
+    if (params.machineId) query.set('machineId', params.machineId);
+    query.set('limit', params.limit || 500);
+
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    const res = await request(`/maintenance-history${qs}`);
+    return res.data || [];
+  },
+
+  /**
    * Fetch active stock alerts
    */
   async getAlerts() {

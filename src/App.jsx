@@ -2,12 +2,14 @@ import { useState } from 'react';
 import Login from './pages/login';
 import Sidebar from './components/sidebar';
 import Machines from './machines/machines';
+import Maintenance from './maintenance/maintenance';
 import Spares from './spares/spares';
 import Employees from './employee/employee';
 import Department from './department/department';
 import Designation from './designation/designation';
 import Settings from './settings/settings';
 import Alerts from './alerts/alerts';
+import Vendors from './vendors/vendors';
 import authService from './services/authService';
 import { FiMenu } from 'react-icons/fi';
 import './App.css';
@@ -68,6 +70,7 @@ function App() {
       <Sidebar
         activeSection={activeSection}
         onNavigate={setActiveSection}
+        onLogout={handleLogout}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -186,26 +189,33 @@ function App() {
 
           {activeSection === 'Machines' && <Machines />}
 
+          {activeSection === 'Work Orders' && <Maintenance />}
+
           {activeSection === 'Spare Parts' && <Spares />}
 
           {activeSection === 'Employees' && <Employees />}
 
-          {activeSection === 'Department' && <Department />}
+          {activeSection === 'Departments' && <Department />}
 
-          {activeSection === 'Designation' && <Designation />}
+          {activeSection === 'Designations' && <Designation />}
 
           {activeSection === 'Settings' && <Settings />}
 
-          {activeSection === 'Alerts' && <Alerts />}
+          {activeSection === 'Alerts & Notifications' && <Alerts />}
+
+          {activeSection === 'Vendors' && <Vendors />}
 
           {activeSection !== 'Dashboard' &&
             activeSection !== 'Machines' &&
+            activeSection !== 'Work Orders' &&
             activeSection !== 'Spare Parts' &&
             activeSection !== 'Employees' &&
-            activeSection !== 'Department' &&
-            activeSection !== 'Designation' &&
+            activeSection !== 'Departments' &&
+            activeSection !== 'Designations' &&
             activeSection !== 'Settings' &&
-            activeSection !== 'Alerts' && (
+            activeSection !== 'Alerts & Notifications' &&
+            activeSection !== 'Vendors' &&
+            activeSection !== 'Logout' && (
               <section className="module-placeholder" aria-live="polite">
                 <p className="section-kicker">WORKSPACE</p>
                 <h1>{activeSection}</h1>

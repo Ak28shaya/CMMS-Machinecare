@@ -15,6 +15,8 @@ import {
   FiAlertTriangle
 } from 'react-icons/fi';
 import employeeService from '../services/employeeService';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import './employee.css';
 
 // Helper for DD/MM/YYYY matching screenshot format
@@ -169,6 +171,7 @@ export default function Employees() {
       return true;
     });
   }, [employees, searchQuery, departmentFilter, statusFilter]);
+  const employeePagination = usePagination(filteredEmployees);
 
   // Open Edit Modal
   const handleOpenEdit = (emp) => {
@@ -471,7 +474,7 @@ export default function Employees() {
                   </td>
                 </tr>
               ) : (
-                filteredEmployees.map((emp) => {
+                employeePagination.pageItems.map((emp) => {
                   const statusClass =
                     emp.status === 'Active'
                       ? 'active'
@@ -549,6 +552,12 @@ export default function Employees() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          totalItems={filteredEmployees.length}
+          currentPage={employeePagination.currentPage}
+          totalPages={employeePagination.totalPages}
+          onPageChange={employeePagination.setCurrentPage}
+        />
       </div>
 
       {/* =========================================================================

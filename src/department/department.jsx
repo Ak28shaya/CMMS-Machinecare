@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   FiBriefcase,
   FiUsers,
@@ -13,75 +13,24 @@ import {
   FiCheck,
   FiAlertTriangle
 } from 'react-icons/fi';
-import employeeService from '../services/employeeService';
+import departmentService from '../services/departmentService';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import './department.css';
 
-const DEFAULT_DEPARTMENTS = [
-  {
-    id: 'dept-1',
-    code: 'DEPT-MNT',
-    name: 'Maintenance',
-    head: 'Karthik S',
-    location: 'Plant-1 Main Workshop',
-    budgetCenter: 'CC-401',
-    status: 'Active',
-    description: 'Responsible for machine preventative maintenance, repairs, spare parts and electrical overhauls.'
-  },
-  {
-    id: 'dept-2',
-    code: 'DEPT-PRD',
-    name: 'Production',
-    head: 'Anita R',
-    location: 'Assembly Floor Bay A & B',
-    budgetCenter: 'CC-402',
-    status: 'Active',
-    description: 'Coordinates machine operations, shifts, component assembly and plant output.'
-  },
-  {
-    id: 'dept-3',
-    code: 'DEPT-QLT',
-    name: 'Quality',
-    head: 'Suresh P',
-    location: 'QA Testing Lab 1',
-    budgetCenter: 'CC-403',
-    status: 'Active',
-    description: 'Oversees tolerance verifications, inspection standards, calibration and compliance.'
-  },
-  {
-    id: 'dept-4',
-    code: 'DEPT-SFT',
-    name: 'Safety',
-    head: 'Deepak T',
-    location: 'EHS Control Center',
-    budgetCenter: 'CC-404',
-    status: 'Active',
-    description: 'Enforces environmental health, OSHA protocols, hazard mitigation and emergency readiness.'
-  },
-  {
-    id: 'dept-5',
-    code: 'DEPT-MGT',
-    name: 'Management',
-    head: 'Swathi A',
-    location: 'Executive Admin Wing',
-    budgetCenter: 'CC-400',
-    status: 'Active',
-    description: 'Plant leadership, strategy, operational planning and personnel coordination.'
-  }
-];
+const EMPTY_DEPARTMENTS = [];
 
 export default function Department() {
-  const [departments, setDepartments] = useState(() => {
-    try {
-      const saved = localStorage.getItem('cmms_departments');
-      return saved ? JSON.parse(saved) : DEFAULT_DEPARTMENTS;
-    } catch {
-      return DEFAULT_DEPARTMENTS;
-    }
+  const [departments, setDepartments] = useState(null);
+  const [departmentStats, setDepartmentStats] = useState({
+    plantHeadcount: 0,
+    activeEmployees: 0
   });
-
-  const [employees, setEmployees] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const loading = departments === null && !loadError;
+  const departmentList = departments || EMPTY_DEPARTMENTS;
+  const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -121,57 +70,43 @@ export default function Department() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Sync with localStorage
-  useEffect(() => {
+  const loadDepartmentData = useCallback(async () => {
     try {
-      localStorage.setItem('cmms_departments', JSON.stringify(departments));
-    } catch (e) {
-      console.warn('LocalStorage save failed:', e);
+      const [departmentList, stats] = await Promise.all([
+        departmentService.getDepartments(),
+        departmentService.getDepartmentStats()
+      ]);
+      setDepartments(departmentList);
+      setDepartmentStats(stats);
+      setLoadError('');
+      return null;
+    } catch (error) {
+      setLoadError(error.message);
+      return error;
     }
-  }, [departments]);
-
-  // Fetch employees to compute live member counts per department
-  const fetchEmployeesData = async () => {
-    try {
-      const data = await employeeService.getEmployees();
-      setEmployees(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.warn('Could not fetch employees for department metrics:', err.message);
-    }
-  };
-
-  useEffect(() => {
-    fetchEmployeesData();
   }, []);
+
+  useEffect(() => {
+    loadDepartmentData();
+  }, [loadDepartmentData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchEmployeesData();
-    setTimeout(() => {
+    try {
+      const error = await loadDepartmentData();
+      if (error) {
+        showToast(error.message, 'danger');
+      } else {
+        showToast('Department data refreshed');
+      }
+    } finally {
       setRefreshing(false);
-      showToast('Department data refreshed');
-    }, 400);
+    }
   };
-
-  // Map employee counts to departments
-  const deptEmployeeCounts = useMemo(() => {
-    const counts = {};
-    employees.forEach((emp) => {
-      const deptName = (emp.department || '').trim();
-      if (!counts[deptName]) {
-        counts[deptName] = { total: 0, active: 0 };
-      }
-      counts[deptName].total += 1;
-      if (emp.status === 'Active') {
-        counts[deptName].active += 1;
-      }
-    });
-    return counts;
-  }, [employees]);
 
   // Filtered list
   const filteredDepartments = useMemo(() => {
-    return departments.filter((dept) => {
+    return departmentList.filter((dept) => {
       if (statusFilter !== 'all' && dept.status !== statusFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -183,30 +118,27 @@ export default function Department() {
       }
       return true;
     });
-  }, [departments, searchQuery, statusFilter]);
+  }, [departmentList, searchQuery, statusFilter]);
+  const departmentPagination = usePagination(filteredDepartments);
 
   // KPIs
   const kpis = useMemo(() => {
-    const total = departments.length;
-    const activeDepts = departments.filter((d) => d.status === 'Active').length;
-    const totalStaff = employees.length || 24;
-    const activeStaff = employees.filter((e) => e.status === 'Active').length || 20;
     return {
-      totalDepts: total,
-      activeDepts,
-      totalStaff,
-      activeStaff
+      totalDepts: departmentStats.totalDepartments || 0,
+      activeDepts: departmentStats.activeDepartments || 0,
+      totalStaff: departmentStats.plantHeadcount || 0,
+      activeStaff: departmentStats.activeEmployees || 0
     };
-  }, [departments, employees]);
+  }, [departmentStats]);
 
   // Handle Add
   const handleOpenAdd = () => {
     setAddForm({
-      code: `DEPT-${String(departments.length + 1).padStart(2, '0')}`,
+      code: `DEPT-${String(departmentList.length + 1).padStart(2, '0')}`,
       name: '',
       head: '',
       location: 'Plant-1 Main Campus',
-      budgetCenter: `CC-40${departments.length + 1}`,
+      budgetCenter: `CC-40${departmentList.length + 1}`,
       status: 'Active',
       description: ''
     });
@@ -214,7 +146,7 @@ export default function Department() {
     setShowAddModal(true);
   };
 
-  const handleSaveAdd = (e) => {
+  const handleSaveAdd = async (e) => {
     e.preventDefault();
     if (!addForm.name.trim()) {
       setAddError('Department name is required');
@@ -225,7 +157,7 @@ export default function Department() {
       return;
     }
 
-    const exists = departments.some(
+    const exists = departmentList.some(
       (d) => d.code.toLowerCase() === addForm.code.trim().toLowerCase()
     );
     if (exists) {
@@ -234,7 +166,6 @@ export default function Department() {
     }
 
     const newDept = {
-      id: `dept-${Date.now()}`,
       code: addForm.code.trim().toUpperCase(),
       name: addForm.name.trim(),
       head: addForm.head.trim() || 'Unassigned',
@@ -244,9 +175,22 @@ export default function Department() {
       description: addForm.description.trim()
     };
 
-    setDepartments((prev) => [...prev, newDept]);
-    setShowAddModal(false);
-    showToast(`Department "${newDept.name}" created successfully`);
+    setSaving(true);
+    try {
+      const createdDepartment = await departmentService.createDepartment(newDept);
+      setDepartments((prev) => [createdDepartment, ...(prev || [])]);
+      setDepartmentStats((prev) => ({
+        ...prev,
+        totalDepartments: (prev.totalDepartments || 0) + 1,
+        activeDepartments: (prev.activeDepartments || 0) + (createdDepartment.status === 'Active' ? 1 : 0)
+      }));
+      setShowAddModal(false);
+      showToast(`Department "${createdDepartment.name}" created successfully`);
+    } catch (error) {
+      setAddError(error.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Handle Edit
@@ -264,38 +208,73 @@ export default function Department() {
     setEditError('');
   };
 
-  const handleSaveEdit = (e) => {
+  const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editForm.name.trim()) {
       setEditError('Department name is required');
       return;
     }
 
-    setDepartments((prev) =>
-      prev.map((d) =>
-        d.id === editingDept.id
-          ? {
-              ...d,
-              name: editForm.name.trim(),
-              head: editForm.head.trim() || 'Unassigned',
-              location: editForm.location.trim() || 'Plant-1',
-              budgetCenter: editForm.budgetCenter.trim(),
-              status: editForm.status,
-              description: editForm.description.trim()
-            }
-          : d
-      )
-    );
-    setEditingDept(null);
-    showToast(`Department "${editForm.name}" updated successfully`);
+    const updatedValues = {
+      code: editForm.code.trim(),
+      name: editForm.name.trim(),
+      head: editForm.head.trim() || 'Unassigned',
+      location: editForm.location.trim() || 'Plant-1',
+      budgetCenter: editForm.budgetCenter.trim(),
+      status: editForm.status,
+      description: editForm.description.trim()
+    };
+
+    setSaving(true);
+    try {
+      const updatedDepartment = await departmentService.updateDepartment(editingDept.id, updatedValues);
+      setDepartments((prev) =>
+        prev.map((department) =>
+          department.id === editingDept.id
+            ? { ...updatedDepartment, teamMembers: department.teamMembers }
+            : department
+        )
+      );
+      if (editingDept.status !== updatedDepartment.status) {
+        setDepartmentStats((prev) => ({
+          ...prev,
+          activeDepartments: Math.max(
+            0,
+            (prev.activeDepartments || 0) + (updatedDepartment.status === 'Active' ? 1 : -1)
+          )
+        }));
+      }
+      setEditingDept(null);
+      showToast(`Department "${updatedDepartment.name}" updated successfully`);
+    } catch (error) {
+      setEditError(error.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Handle Delete
-  const handleDelete = (id) => {
-    const target = departments.find((d) => d.id === id);
-    setDepartments((prev) => prev.filter((d) => d.id !== id));
-    setDeleteConfirmId(null);
-    showToast(`Department "${target?.name || ''}" removed`, 'danger');
+  const handleDelete = async (id) => {
+    const target = departmentList.find((d) => d.id === id);
+    setSaving(true);
+    try {
+      await departmentService.deleteDepartment(id);
+      setDepartments((prev) => prev.filter((d) => d.id !== id));
+      setDepartmentStats((prev) => ({
+        ...prev,
+        totalDepartments: Math.max(0, (prev.totalDepartments || 0) - 1),
+        activeDepartments: Math.max(
+          0,
+          (prev.activeDepartments || 0) - (target?.status === 'Active' ? 1 : 0)
+        )
+      }));
+      setDeleteConfirmId(null);
+      showToast(`Department "${target?.name || ''}" removed`, 'danger');
+    } catch (error) {
+      showToast(error.message, 'danger');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -313,7 +292,7 @@ export default function Department() {
         <div className="dept-header-left">
           <div className="dept-title-row">
             <h1>Department</h1>
-            <span className="dept-badge-pill">{departments.length} Total</span>
+            <span className="dept-badge-pill">{kpis.totalDepts} Total</span>
           </div>
           <p className="dept-subtitle">
             Manage organizational divisions, cost centers, and team allocations across the plant.
@@ -324,17 +303,26 @@ export default function Department() {
             type="button"
             className="dept-btn-outline"
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={refreshing || loading}
           >
             <FiRefreshCw className={refreshing ? 'spinning' : ''} />
             <span>Refresh</span>
           </button>
-          <button type="button" className="dept-btn-primary" onClick={handleOpenAdd}>
+          <button type="button" className="dept-btn-primary" onClick={handleOpenAdd} disabled={loading}>
             <FiPlus />
             <span>Add Department</span>
           </button>
         </div>
       </div>
+
+      {loadError && (
+        <div className="dept-load-error" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={handleRefresh} disabled={refreshing}>
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards Row */}
       <div className="dept-kpi-grid">
@@ -374,14 +362,14 @@ export default function Department() {
           </div>
         </div>
 
-        {/* Card 4: Operating Hubs */}
+        {/* Card 4: Active Staff */}
         <div className="dept-kpi-card">
           <div className="dept-kpi-info">
-            <span className="dept-kpi-label">ACTIVE ON-DUTY</span>
+            <span className="dept-kpi-label">ACTIVE STAFF</span>
             <span className="dept-kpi-val">{kpis.activeStaff}</span>
           </div>
           <div className="dept-kpi-icon-box red">
-            <FiMapPin />
+            <FiUsers />
           </div>
         </div>
       </div>
@@ -437,15 +425,18 @@ export default function Department() {
             </tr>
           </thead>
           <tbody>
-            {filteredDepartments.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td colSpan="7" className="td-empty">Loading departments...</td>
+              </tr>
+            ) : filteredDepartments.length === 0 ? (
               <tr>
                 <td colSpan="7" className="td-empty">
-                  No departments found matching your criteria.
+                  {loadError ? 'Department data is unavailable.' : 'No departments found matching your criteria.'}
                 </td>
               </tr>
             ) : (
-              filteredDepartments.map((dept) => {
-                const metrics = deptEmployeeCounts[dept.name] || { total: 0, active: 0 };
+              departmentPagination.pageItems.map((dept) => {
                 const isActive = dept.status === 'Active';
 
                 return (
@@ -482,7 +473,7 @@ export default function Department() {
                       <div className="dept-members-chip">
                         <FiUsers className="dept-members-icon" />
                         <span>
-                          <strong>{metrics.total || '—'}</strong> staff
+                          <strong>{dept.teamMembers}</strong> staff
                         </span>
                       </div>
                     </td>
@@ -520,6 +511,12 @@ export default function Department() {
           </tbody>
         </table>
       </div>
+      <Pagination
+        totalItems={filteredDepartments.length}
+        currentPage={departmentPagination.currentPage}
+        totalPages={departmentPagination.totalPages}
+        onPageChange={departmentPagination.setCurrentPage}
+      />
 
       {/* ADD DEPARTMENT MODAL */}
       {showAddModal && (
@@ -622,8 +619,8 @@ export default function Department() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="dept-btn-primary">
-                  Add Department
+                <button type="submit" className="dept-btn-primary" disabled={saving}>
+                  {saving ? 'Saving...' : 'Add Department'}
                 </button>
               </div>
             </form>
@@ -721,8 +718,8 @@ export default function Department() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="dept-btn-primary">
-                  Save Changes
+                <button type="submit" className="dept-btn-primary" disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
@@ -739,8 +736,8 @@ export default function Department() {
             </div>
             <h3>Delete Department?</h3>
             <p>
-              Are you sure you want to delete this department? Employees assigned to this department
-              will retain their records.
+              Are you sure you want to delete this department? Departments with assigned employees
+              cannot be deleted.
             </p>
             <div className="dept-modal-footer center">
               <button
@@ -754,8 +751,9 @@ export default function Department() {
                 type="button"
                 className="dept-btn-danger"
                 onClick={() => handleDelete(deleteConfirmId)}
+                disabled={saving}
               >
-                Yes, Delete
+                {saving ? 'Deleting...' : 'Yes, Delete'}
               </button>
             </div>
           </div>

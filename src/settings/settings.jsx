@@ -46,14 +46,16 @@ const DEFAULT_SETTINGS = {
   dateFormat: 'DD/MM/YYYY',
   currency: 'INR (₹)',
   defaultLandingView: 'Employees',
-  tablePageSize: '25'
+  tablePageSize: '10'
 };
 
 export default function Settings() {
   const [settings, setSettings] = useState(() => {
     try {
       const saved = localStorage.getItem('cmms_settings');
-      return saved ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) } : DEFAULT_SETTINGS;
+      return saved
+        ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved), tablePageSize: '10' }
+        : DEFAULT_SETTINGS;
     } catch {
       return DEFAULT_SETTINGS;
     }
@@ -491,8 +493,8 @@ export default function Settings() {
                   <option value="Dashboard">Dashboard</option>
                   <option value="Machines">Machines</option>
                   <option value="Spare Parts">Spare Parts</option>
-                  <option value="Department">Department</option>
-                  <option value="Designation">Designation</option>
+                  <option value="Departments">Departments</option>
+                  <option value="Designations">Designations</option>
                 </select>
               </div>
 
@@ -503,9 +505,6 @@ export default function Settings() {
                   onChange={(e) => handleInputChange('tablePageSize', e.target.value)}
                 >
                   <option value="10">10 records per page</option>
-                  <option value="25">25 records per page</option>
-                  <option value="50">50 records per page</option>
-                  <option value="100">100 records per page</option>
                 </select>
               </div>
             </div>

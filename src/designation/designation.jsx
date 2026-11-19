@@ -1,20 +1,24 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   FiAward,
   FiUsers,
   FiBriefcase,
-  FiShield,
-  FiRefreshCw,
   FiPlus,
   FiSearch,
   FiEdit2,
   FiTrash2,
   FiX,
   FiCheck,
-  FiAlertTriangle
+  FiAlertTriangle,
+  FiRefreshCw
 } from 'react-icons/fi';
-import employeeService from '../services/employeeService';
+import designationService from '../services/designationService';
+import departmentService from '../services/departmentService';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import './designation.css';
+
+const DEFAULT_DEPARTMENTS = ['Maintenance', 'Production', 'Quality', 'Safety', 'Management'];
 
 const DEFAULT_DESIGNATIONS = [
   {
@@ -22,8 +26,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-ENG',
     title: 'Maintenance Engineer',
     department: 'Maintenance',
-    level: 'Senior',
-    grade: 'L4',
     status: 'Active',
     description: 'Diagnoses high-precision mechanical systems, calibrates CNC lathes and leads overhaul tasks.'
   },
@@ -32,8 +34,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-TECH',
     title: 'Technician',
     department: 'Production',
-    level: 'Mid-Level',
-    grade: 'L2',
     status: 'Active',
     description: 'Executes standard assembly sequences, monitors cycle times and performs routine tool changes.'
   },
@@ -42,8 +42,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-QENG',
     title: 'Quality Engineer',
     department: 'Quality',
-    level: 'Senior',
-    grade: 'L4',
     status: 'Active',
     description: 'Ensures ISO compliance, performs non-destructive testing and validates parts tolerances.'
   },
@@ -52,8 +50,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-SUP',
     title: 'Supervisor',
     department: 'Maintenance',
-    level: 'Lead / Supervisory',
-    grade: 'L5',
     status: 'Active',
     description: 'Schedules shift assignments, signs off on work orders and allocates emergency repair teams.'
   },
@@ -62,8 +58,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-OPR',
     title: 'Operator',
     department: 'Production',
-    level: 'Junior / Entry',
-    grade: 'L1',
     status: 'Active',
     description: 'Operates hydraulic presses, conveyors and packaging systems in designated floor bays.'
   },
@@ -72,8 +66,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-ELEC',
     title: 'Electrical Tech',
     department: 'Maintenance',
-    level: 'Mid-Level',
-    grade: 'L3',
     status: 'Active',
     description: 'Maintains motor drives, switchgear panels, circuit breakers and plant electrical distribution.'
   },
@@ -82,8 +74,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-QA',
     title: 'QA Analyst',
     department: 'Quality',
-    level: 'Mid-Level',
-    grade: 'L3',
     status: 'Active',
     description: 'Analyzes batch variance charts, defect rate logs and conducts metallurgical checks.'
   },
@@ -92,8 +82,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-SAF',
     title: 'Safety Officer',
     department: 'Safety',
-    level: 'Lead / Supervisory',
-    grade: 'L4',
     status: 'Active',
     description: 'Conducts daily hazard walk-throughs, manages PPE inventories and emergency drill logs.'
   },
@@ -102,8 +90,6 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-MGR',
     title: 'Plant Manager',
     department: 'Management',
-    level: 'Executive',
-    grade: 'L6',
     status: 'Active',
     description: 'Responsible for complete plant operations, uptime KPIs, safety standards and output targets.'
   },
@@ -112,28 +98,20 @@ const DEFAULT_DESIGNATIONS = [
     code: 'DESG-MECH',
     title: 'Mechanical Tech',
     department: 'Maintenance',
-    level: 'Mid-Level',
-    grade: 'L3',
     status: 'Active',
     description: 'Replaces bearings, belts, seals, alignments, and lubricates mechanical drives.'
   }
 ];
 
 export default function Designation() {
-  const [designations, setDesignations] = useState(() => {
-    try {
-      const saved = localStorage.getItem('cmms_designations');
-      return saved ? JSON.parse(saved) : DEFAULT_DESIGNATIONS;
-    } catch {
-      return DEFAULT_DESIGNATIONS;
-    }
-  });
-
-  const [employees, setEmployees] = useState([]);
+  const [designations, setDesignations] = useState(DEFAULT_DESIGNATIONS);
+  const [departmentsList, setDepartmentsList] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState('all');
-  const [levelFilter, setLevelFilter] = useState('all');
 
   // Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -141,8 +119,6 @@ export default function Designation() {
     code: '',
     title: '',
     department: 'Maintenance',
-    level: 'Mid-Level',
-    grade: 'L3',
     status: 'Active',
     description: ''
   });
@@ -154,8 +130,6 @@ export default function Designation() {
     code: '',
     title: '',
     department: 'Maintenance',
-    level: 'Mid-Level',
-    grade: 'L3',
     status: 'Active',
     description: ''
   });
@@ -171,56 +145,60 @@ export default function Designation() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Sync with localStorage
-  useEffect(() => {
+  // Fetch designations & departments from backend
+  const fetchDesignationData = useCallback(async () => {
     try {
-      localStorage.setItem('cmms_designations', JSON.stringify(designations));
-    } catch (e) {
-      console.warn('LocalStorage save failed:', e);
-    }
-  }, [designations]);
+      setLoading(true);
+      const [backendDesgs, backendDepts] = await Promise.all([
+        designationService.getDesignations(),
+        departmentService.getDepartments().catch(() => [])
+      ]);
 
-  // Fetch employees to compute designation counts
-  const fetchEmployeesData = async () => {
-    try {
-      const data = await employeeService.getEmployees();
-      setEmployees(Array.isArray(data) ? data : []);
+      if (Array.isArray(backendDesgs) && backendDesgs.length > 0) {
+        setDesignations(backendDesgs);
+      } else {
+        setDesignations(DEFAULT_DESIGNATIONS);
+      }
+
+      if (Array.isArray(backendDepts) && backendDepts.length > 0) {
+        setDepartmentsList(backendDepts);
+      }
     } catch (err) {
-      console.warn('Could not fetch employees for designation metrics:', err.message);
+      console.warn('Backend designations fetch note:', err.message);
+      // Fallback
+      setDesignations((prev) => (prev && prev.length > 0 ? prev : DEFAULT_DESIGNATIONS));
+    } finally {
+      setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchEmployeesData();
   }, []);
 
+  useEffect(() => {
+    fetchDesignationData();
+  }, [fetchDesignationData]);
+
+  // Handle Refresh
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchEmployeesData();
+    await fetchDesignationData();
     setTimeout(() => {
       setRefreshing(false);
-      showToast('Designation data refreshed');
+      showToast('Designations data refreshed');
     }, 400);
   };
 
-  // Map employee counts to designations
-  const desgEmployeeCounts = useMemo(() => {
-    const counts = {};
-    employees.forEach((emp) => {
-      const title = (emp.designation || '').trim();
-      if (!counts[title]) {
-        counts[title] = 0;
-      }
-      counts[title] += 1;
-    });
-    return counts;
-  }, [employees]);
+  // Available department names for dropdowns
+  const availableDepartmentNames = useMemo(() => {
+    if (departmentsList.length > 0) {
+      const names = departmentsList.map((d) => d.name).filter(Boolean);
+      return Array.from(new Set(names));
+    }
+    return DEFAULT_DEPARTMENTS;
+  }, [departmentsList]);
 
   // Filtered list
   const filteredDesignations = useMemo(() => {
     return designations.filter((desg) => {
       if (deptFilter !== 'all' && desg.department !== deptFilter) return false;
-      if (levelFilter !== 'all' && desg.level !== levelFilter) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const code = (desg.code || '').toLowerCase();
@@ -230,30 +208,33 @@ export default function Designation() {
       }
       return true;
     });
-  }, [designations, searchQuery, deptFilter, levelFilter]);
+  }, [designations, searchQuery, deptFilter]);
+
+  const designationPagination = usePagination(filteredDesignations);
 
   // KPIs
   const kpis = useMemo(() => {
     const total = designations.length;
-    const engineering = designations.filter((d) => d.department === 'Maintenance' || d.department === 'Quality').length;
-    const leads = designations.filter((d) => d.level === 'Lead / Supervisory' || d.level === 'Executive').length;
+    const engineering = designations.filter(
+      (d) => d.department === 'Maintenance' || d.department === 'Quality'
+    ).length;
+    const departments = new Set(designations.map((d) => d.department)).size;
     const ops = designations.filter((d) => d.department === 'Production').length;
     return {
       total,
       engineering,
-      leads,
+      departments,
       ops
     };
   }, [designations]);
 
   // Handle Add
   const handleOpenAdd = () => {
+    const defaultDept = availableDepartmentNames[0] || 'Maintenance';
     setAddForm({
       code: `DESG-${String(designations.length + 1).padStart(2, '0')}`,
       title: '',
-      department: 'Maintenance',
-      level: 'Mid-Level',
-      grade: 'L3',
+      department: defaultDept,
       status: 'Active',
       description: ''
     });
@@ -261,39 +242,56 @@ export default function Designation() {
     setShowAddModal(true);
   };
 
-  const handleSaveAdd = (e) => {
+  const handleSaveAdd = async (e) => {
     e.preventDefault();
     if (!addForm.title.trim()) {
       setAddError('Designation title is required');
       return;
     }
     if (!addForm.code.trim()) {
-      setAddError('Designation code is required');
+      setAddError('Role code is required');
       return;
     }
 
     const exists = designations.some(
-      (d) => d.code.toLowerCase() === addForm.code.trim().toLowerCase()
+      (d) => (d.code || '').toLowerCase() === addForm.code.trim().toLowerCase()
     );
     if (exists) {
       setAddError(`Designation code "${addForm.code}" already exists.`);
       return;
     }
 
-    const newDesg = {
-      id: `desg-${Date.now()}`,
-      code: addForm.code.trim().toUpperCase(),
-      title: addForm.title.trim(),
-      department: addForm.department,
-      level: addForm.level,
-      grade: addForm.grade.trim() || 'L1',
-      status: addForm.status,
-      description: addForm.description.trim()
-    };
+    setSaving(true);
+    setAddError('');
 
-    setDesignations((prev) => [...prev, newDesg]);
-    setShowAddModal(false);
-    showToast(`Designation "${newDesg.title}" added successfully`);
+    try {
+      const payload = {
+        code: addForm.code.trim().toUpperCase(),
+        title: addForm.title.trim(),
+        department: addForm.department,
+        status: addForm.status,
+        description: addForm.description.trim()
+      };
+
+      let created;
+      try {
+        created = await designationService.createDesignation(payload);
+      } catch (err) {
+        console.warn('Remote create failed, saving locally:', err.message);
+        created = {
+          id: `desg-${Date.now()}`,
+          ...payload
+        };
+      }
+
+      setDesignations((prev) => [created, ...prev]);
+      setShowAddModal(false);
+      showToast(`Designation "${created.title}" added successfully`);
+    } catch (err) {
+      setAddError(err.message || 'Failed to add designation');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Handle Edit
@@ -303,43 +301,66 @@ export default function Designation() {
       code: desg.code,
       title: desg.title,
       department: desg.department,
-      level: desg.level,
-      grade: desg.grade || 'L1',
       status: desg.status,
       description: desg.description || ''
     });
     setEditError('');
   };
 
-  const handleSaveEdit = (e) => {
+  const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editForm.title.trim()) {
       setEditError('Designation title is required');
       return;
     }
 
-    setDesignations((prev) =>
-      prev.map((d) =>
-        d.id === editingDesg.id
-          ? {
-              ...d,
-              title: editForm.title.trim(),
-              department: editForm.department,
-              level: editForm.level,
-              grade: editForm.grade.trim(),
-              status: editForm.status,
-              description: editForm.description.trim()
-            }
-          : d
-      )
-    );
-    setEditingDesg(null);
-    showToast(`Designation "${editForm.title}" updated successfully`);
+    setSaving(true);
+    setEditError('');
+
+    try {
+      const payload = {
+        code: editForm.code,
+        title: editForm.title.trim(),
+        department: editForm.department,
+        status: editForm.status,
+        description: editForm.description.trim()
+      };
+
+      let updated;
+      try {
+        if (editingDesg.id && !editingDesg.id.startsWith('desg-')) {
+          updated = await designationService.updateDesignation(editingDesg.id, payload);
+        } else {
+          updated = { id: editingDesg.id, ...payload };
+        }
+      } catch (err) {
+        console.warn('Remote update failed, updating locally:', err.message);
+        updated = { id: editingDesg.id, ...payload };
+      }
+
+      setDesignations((prev) =>
+        prev.map((d) => (d.id === editingDesg.id ? updated : d))
+      );
+      setEditingDesg(null);
+      showToast(`Designation "${updated.title}" updated successfully`);
+    } catch (err) {
+      setEditError(err.message || 'Failed to update designation');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Handle Delete
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     const target = designations.find((d) => d.id === id);
+    try {
+      if (id && !id.startsWith('desg-')) {
+        await designationService.deleteDesignation(id);
+      }
+    } catch (err) {
+      console.warn('Remote delete failed, deleting locally:', err.message);
+    }
+
     setDesignations((prev) => prev.filter((d) => d.id !== id));
     setDeleteConfirmId(null);
     showToast(`Designation "${target?.title || ''}" removed`, 'danger');
@@ -363,7 +384,7 @@ export default function Designation() {
             <span className="desg-badge-pill">{designations.length} Total</span>
           </div>
           <p className="desg-subtitle">
-            Configure job designations, skill requirements, role bands, and organizational hierarchy.
+            Manage job designations, departments, and responsibilities.
           </p>
         </div>
         <div className="desg-header-actions">
@@ -372,6 +393,7 @@ export default function Designation() {
             className="desg-btn-outline"
             onClick={handleRefresh}
             disabled={refreshing}
+            title="Refresh designations from backend"
           >
             <FiRefreshCw className={refreshing ? 'spinning' : ''} />
             <span>Refresh</span>
@@ -410,14 +432,14 @@ export default function Designation() {
           </div>
         </div>
 
-        {/* Card 3: Supervisory Roles */}
+        {/* Card 3: Departments */}
         <div className="desg-kpi-card">
           <div className="desg-kpi-info">
-            <span className="desg-kpi-label">LEAD & SUPERVISORY</span>
-            <span className="desg-kpi-val">{kpis.leads}</span>
+            <span className="desg-kpi-label">DEPARTMENTS</span>
+            <span className="desg-kpi-val">{kpis.departments}</span>
           </div>
           <div className="desg-kpi-icon-box amber">
-            <FiShield />
+            <FiBriefcase />
           </div>
         </div>
 
@@ -462,26 +484,11 @@ export default function Designation() {
               onChange={(e) => setDeptFilter(e.target.value)}
             >
               <option value="all">All Departments</option>
-              <option value="Maintenance">Maintenance</option>
-              <option value="Production">Production</option>
-              <option value="Quality">Quality</option>
-              <option value="Safety">Safety</option>
-              <option value="Management">Management</option>
-            </select>
-          </div>
-
-          <div className="desg-select-group">
-            <label>Level:</label>
-            <select
-              value={levelFilter}
-              onChange={(e) => setLevelFilter(e.target.value)}
-            >
-              <option value="all">All Levels</option>
-              <option value="Executive">Executive</option>
-              <option value="Lead / Supervisory">Lead / Supervisory</option>
-              <option value="Senior">Senior</option>
-              <option value="Mid-Level">Mid-Level</option>
-              <option value="Junior / Entry">Junior / Entry</option>
+              {availableDepartmentNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -495,9 +502,6 @@ export default function Designation() {
               <th>ROLE CODE</th>
               <th>DESIGNATION TITLE</th>
               <th>DEPARTMENT</th>
-              <th>ROLE LEVEL</th>
-              <th>PAY GRADE</th>
-              <th>ASSIGNED STAFF</th>
               <th>STATUS</th>
               <th className="th-center">ACTIONS</th>
             </tr>
@@ -505,13 +509,12 @@ export default function Designation() {
           <tbody>
             {filteredDesignations.length === 0 ? (
               <tr>
-                <td colSpan="8" className="td-empty">
+                <td colSpan="5" className="td-empty">
                   No designations found matching your criteria.
                 </td>
               </tr>
             ) : (
-              filteredDesignations.map((desg) => {
-                const assigned = desgEmployeeCounts[desg.title] || 0;
+              designationPagination.pageItems.map((desg) => {
                 const isActive = desg.status === 'Active';
 
                 return (
@@ -535,19 +538,6 @@ export default function Designation() {
                         <FiBriefcase />
                         <span>{desg.department}</span>
                       </div>
-                    </td>
-                    <td>
-                      <span className={`level-badge level-${desg.level.toLowerCase().replace(/[^a-z]/g, '')}`}>
-                        {desg.level}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="grade-tag">{desg.grade}</span>
-                    </td>
-                    <td>
-                      <span className="desg-staff-count">
-                        <strong>{assigned}</strong> {assigned === 1 ? 'member' : 'members'}
-                      </span>
                     </td>
                     <td>
                       <span className={`status-pill ${isActive ? 'active' : 'inactive'}`}>
@@ -583,6 +573,12 @@ export default function Designation() {
           </tbody>
         </table>
       </div>
+      <Pagination
+        totalItems={filteredDesignations.length}
+        currentPage={designationPagination.currentPage}
+        totalPages={designationPagination.totalPages}
+        onPageChange={designationPagination.setCurrentPage}
+      />
 
       {/* ADD DESIGNATION MODAL */}
       {showAddModal && (
@@ -631,36 +627,12 @@ export default function Designation() {
                     value={addForm.department}
                     onChange={(e) => setAddForm({ ...addForm, department: e.target.value })}
                   >
-                    <option value="Maintenance">Maintenance</option>
-                    <option value="Production">Production</option>
-                    <option value="Quality">Quality</option>
-                    <option value="Safety">Safety</option>
-                    <option value="Management">Management</option>
+                    {availableDepartmentNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
                   </select>
-                </div>
-
-                <div className="desg-form-group">
-                  <label>Hierarchy Level</label>
-                  <select
-                    value={addForm.level}
-                    onChange={(e) => setAddForm({ ...addForm, level: e.target.value })}
-                  >
-                    <option value="Executive">Executive</option>
-                    <option value="Lead / Supervisory">Lead / Supervisory</option>
-                    <option value="Senior">Senior</option>
-                    <option value="Mid-Level">Mid-Level</option>
-                    <option value="Junior / Entry">Junior / Entry</option>
-                  </select>
-                </div>
-
-                <div className="desg-form-group">
-                  <label>Grade Band</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. L3"
-                    value={addForm.grade}
-                    onChange={(e) => setAddForm({ ...addForm, grade: e.target.value })}
-                  />
                 </div>
 
                 <div className="desg-form-group">
@@ -693,8 +665,8 @@ export default function Designation() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="desg-btn-primary">
-                  Add Designation
+                <button type="submit" className="desg-btn-primary" disabled={saving}>
+                  {saving ? 'Adding...' : 'Add Designation'}
                 </button>
               </div>
             </form>
@@ -742,35 +714,12 @@ export default function Designation() {
                     value={editForm.department}
                     onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
                   >
-                    <option value="Maintenance">Maintenance</option>
-                    <option value="Production">Production</option>
-                    <option value="Quality">Quality</option>
-                    <option value="Safety">Safety</option>
-                    <option value="Management">Management</option>
+                    {availableDepartmentNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
                   </select>
-                </div>
-
-                <div className="desg-form-group">
-                  <label>Hierarchy Level</label>
-                  <select
-                    value={editForm.level}
-                    onChange={(e) => setEditForm({ ...editForm, level: e.target.value })}
-                  >
-                    <option value="Executive">Executive</option>
-                    <option value="Lead / Supervisory">Lead / Supervisory</option>
-                    <option value="Senior">Senior</option>
-                    <option value="Mid-Level">Mid-Level</option>
-                    <option value="Junior / Entry">Junior / Entry</option>
-                  </select>
-                </div>
-
-                <div className="desg-form-group">
-                  <label>Grade Band</label>
-                  <input
-                    type="text"
-                    value={editForm.grade}
-                    onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
-                  />
                 </div>
 
                 <div className="desg-form-group">
@@ -802,8 +751,8 @@ export default function Designation() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="desg-btn-primary">
-                  Save Changes
+                <button type="submit" className="desg-btn-primary" disabled={saving}>
+                  {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
@@ -845,4 +794,3 @@ export default function Designation() {
     </div>
   );
 }
-

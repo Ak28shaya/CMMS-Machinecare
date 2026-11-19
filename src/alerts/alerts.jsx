@@ -11,6 +11,8 @@ import {
   FiX,
   FiCheckCircle,
 } from 'react-icons/fi';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import alertService from '../services/alertService';
 import machineService from '../services/machineService';
 import './alerts.css';
@@ -146,6 +148,7 @@ export default function Alerts() {
       return true;
     });
   }, [alerts, searchQuery, alertTypeFilter, statusFilter]);
+  const alertPagination = usePagination(filteredAlerts);
 
   // Handle Create Alert
   const handleOpenCreate = () => {
@@ -434,7 +437,7 @@ export default function Alerts() {
                 </td>
               </tr>
             ) : (
-              filteredAlerts.map((alert) => {
+              alertPagination.pageItems.map((alert) => {
                 const priorityClass = (alert.priority || 'Info').toLowerCase();
                 const statusClass = (alert.status || 'Open').toLowerCase();
 
@@ -515,6 +518,14 @@ export default function Alerts() {
           </tbody>
         </table>
       </div>
+      {!loading && (
+        <Pagination
+          totalItems={filteredAlerts.length}
+          currentPage={alertPagination.currentPage}
+          totalPages={alertPagination.totalPages}
+          onPageChange={alertPagination.setCurrentPage}
+        />
+      )}
 
       {/* CREATE ALERT MODAL */}
       {showCreateModal && (

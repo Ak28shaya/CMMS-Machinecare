@@ -14,6 +14,8 @@ import {
   FiArrowDownLeft,
   FiArrowUpRight
 } from 'react-icons/fi';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import spareService from '../services/spareService';
 import machineService from '../services/machineService';
 import './spares.css';
@@ -110,9 +112,9 @@ export default function Spares() {
 
     try {
       const [sparesData, machinesData, ledgerData, summaryRes] = await Promise.all([
-        spareService.getSpares({ limit: 300 }),
+        spareService.getSpares({ limit: 200 }),
         machineService.getAllMachines(),
-        spareService.getLedger({ limit: 100 }),
+        spareService.getLedger({ limit: 500 }),
         spareService.getSummary()
       ]);
 
@@ -213,18 +215,18 @@ export default function Spares() {
       return true;
     });
   }, [spares, searchQuery, statusFilter]);
+  const sparePagination = usePagination(filteredSpares);
 
   // Filtered ledger rows
   const filteredLedger = useMemo(() => {
-    if (ledgerPartFilter === 'all') return ledgerTxns.slice(0, 50);
+    if (ledgerPartFilter === 'all') return ledgerTxns;
 
-    return ledgerTxns
-      .filter((t) => {
-        const sId = String(t.spare?._id || t.spare || '');
-        return sId === String(ledgerPartFilter);
-      })
-      .slice(0, 50);
+    return ledgerTxns.filter((t) => {
+      const sId = String(t.spare?._id || t.spare || '');
+      return sId === String(ledgerPartFilter);
+    });
   }, [ledgerTxns, ledgerPartFilter]);
+  const ledgerPagination = usePagination(filteredLedger);
 
   // Open Edit Modal
   const handleOpenEditModal = (spare) => {
@@ -607,7 +609,7 @@ export default function Spares() {
                   </td>
                 </tr>
               ) : (
-                filteredSpares.map((spare) => {
+                sparePagination.pageItems.map((spare) => {
                   const stock = spare.stock ?? spare.quantity ?? 0;
                   const min = spare.minStock ?? spare.min ?? 0;
                   const max = spare.maxStock ?? spare.max ?? (min ? min * 3 : 10);
@@ -710,6 +712,14 @@ export default function Spares() {
             </tbody>
           </table>
         </div>
+        {!loading && (
+          <Pagination
+            totalItems={filteredSpares.length}
+            currentPage={sparePagination.currentPage}
+            totalPages={sparePagination.totalPages}
+            onPageChange={sparePagination.setCurrentPage}
+          />
+        )}
       </div>
 
       {/* 5. Stock Ledger Table Card */}
@@ -756,7 +766,7 @@ export default function Spares() {
                   </td>
                 </tr>
               ) : (
-                filteredLedger.map((txn, idx) => {
+                ledgerPagination.pageItems.map((txn, idx) => {
                   const isOut = txn.type === 'OUT' || txn.transactionType === 'OUT';
                   const partName = txn.partName || txn.spare?.name || txn.sparePart?.partName || 'Spare Part';
                   const performedBy = txn.performedByName || txn.performedBy?.name || 'Storekeeper';
@@ -785,6 +795,14 @@ export default function Spares() {
             </tbody>
           </table>
         </div>
+        {!loading && (
+          <Pagination
+            totalItems={filteredLedger.length}
+            currentPage={ledgerPagination.currentPage}
+            totalPages={ledgerPagination.totalPages}
+            onPageChange={ledgerPagination.setCurrentPage}
+          />
+        )}
       </div>
 
       {/* =========================================================================

@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import machineService from '../services/machineService';
 import spareService from '../services/spareService';
 import employeeService from '../services/employeeService';
@@ -92,6 +94,7 @@ function Machines() {
       return matchesSearch && matchesStatus && matchesLocation;
     });
   }, [machines, searchTerm, statusFilter, locationFilter]);
+  const machinePagination = usePagination(filteredMachines);
 
   // Open Modal for Add
   const handleOpenAddModal = async () => {
@@ -473,7 +476,7 @@ function Machines() {
                 </tr>
               </thead>
               <tbody>
-                {filteredMachines.map((machine) => {
+                {machinePagination.pageItems.map((machine) => {
                   const statusKey = machine.status?.toLowerCase().replace(/\s+/g, '-') || 'running';
 
                   return (
@@ -604,6 +607,14 @@ function Machines() {
               </tbody>
             </table>
           </div>
+        )}
+        {!loading && (
+          <Pagination
+            totalItems={filteredMachines.length}
+            currentPage={machinePagination.currentPage}
+            totalPages={machinePagination.totalPages}
+            onPageChange={machinePagination.setCurrentPage}
+          />
         )}
       </div>
 
