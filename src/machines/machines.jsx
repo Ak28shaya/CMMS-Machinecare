@@ -477,8 +477,10 @@ function Machines() {
                         <div className="name-cell">
                           <span className="machine-name">{machine.name}</span>
                           <span className="created-date">
-                            Added: {new Date(machine.createdAt || Date.now()).toLocaleDateString()}
-                          </span>
+                                Added: {machine.createdAt
+                                  ? new Date(machine.createdAt).toLocaleDateString()
+                                  : '—'}
+                              </span>
                         </div>
                       </td>
 
@@ -513,7 +515,7 @@ function Machines() {
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
                           </svg>
-                          {machine.spares || 0} spares
+                          {machine.spareCount} spares
                         </span>
                       </td>
 

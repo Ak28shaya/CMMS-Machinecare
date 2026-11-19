@@ -41,12 +41,52 @@ export const spareService = {
     const query = new URLSearchParams();
     if (params.search) query.set('search', params.search);
     if (params.machineId && params.machineId !== 'all') query.set('machineId', params.machineId);
-    if (params.status && params.status !== 'all') query.set('status', params.status);
+    if (params.status && params.status !== 'all') {
+      const status = String(params.status).toLowerCase();
+      const apiStatus = { out: 'Out', low: 'Low', ok: 'OK' }[status] || params.status;
+      query.set('status', apiStatus);
+    }
     query.set('limit', params.limit || 200);
 
-    const qs = query.toString() ? `?${query.toString()}` : '';
-    const res = await request(qs);
-    return res.data || [];
+    const spares = [];
+    const spareIds = new Set();
+    let page = 1;
+    let totalPages = 1;
+    let expectedTotal;
+
+    do {
+      query.set('page', String(page));
+      const res = await request(`?${query.toString()}`);
+      const pageCount = Number(res.pagination?.pages);
+      const total = Number(res.pagination?.total);
+
+      if (!Array.isArray(res.data) || !Number.isInteger(pageCount) || pageCount < 0 ||
+          !Number.isInteger(total) || total < 0) {
+        throw new Error('Backend returned invalid spare pagination data.');
+      }
+      if (expectedTotal !== undefined && expectedTotal !== total) {
+        throw new Error('Spare inventory changed while it was being loaded. Refresh and try again.');
+      }
+
+      for (const spare of res.data) {
+        const id = String(spare._id || '');
+        if (!id || spareIds.has(id)) {
+          throw new Error('Backend returned missing or duplicate spare records.');
+        }
+        spareIds.add(id);
+      }
+
+      expectedTotal = total;
+      spares.push(...res.data);
+      totalPages = pageCount;
+      page += 1;
+    } while (page <= totalPages);
+
+    if (spares.length !== expectedTotal) {
+      throw new Error('Backend returned an incomplete spare list.');
+    }
+
+    return spares;
   },
 
   /**
@@ -113,7 +153,10 @@ export const spareService = {
    */
   async getMachineSpares(machineId) {
     const res = await request(`/machine/${machineId}`);
-    return res.data || [];
+    if (!Array.isArray(res.data)) {
+      throw new Error('Backend returned invalid machine spare mappings.');
+    }
+    return res.data;
   },
 
   /**
@@ -145,11 +188,21 @@ export const spareService = {
     const query = new URLSearchParams();
     if (params.spareId && params.spareId !== 'all') query.set('spareId', params.spareId);
     if (params.type && params.type !== 'all') query.set('type', params.type);
-    query.set('limit', params.limit || 100);
+    query.set('page', String(params.page || 1));
+    query.set('limit', String(params.limit || 50));
 
     const qs = query.toString() ? `?${query.toString()}` : '';
     const res = await request(`/ledger${qs}`);
-    return res.data || [];
+    if (!Array.isArray(res.data) || !res.pagination ||
+        !Number.isInteger(Number(res.pagination.total)) ||
+        !Number.isInteger(Number(res.pagination.pages))) {
+      throw new Error('Backend returned invalid stock ledger data.');
+    }
+
+    return {
+      data: res.data,
+      pagination: res.pagination
+    };
   },
 
   /**
@@ -165,7 +218,14 @@ export const spareService = {
    */
   async getSummary() {
     const res = await request('/summary');
-    return res.data || {};
+    const summary = res.data;
+    const countFields = ['totalParts', 'inStock', 'lowStock', 'outOfStock'];
+    if (!summary || countFields.some((field) =>
+      !Number.isInteger(summary[field]) || summary[field] < 0
+    )) {
+      throw new Error('Backend returned invalid inventory summary data.');
+    }
+    return summary;
   },
 
   /**

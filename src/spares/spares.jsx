@@ -44,6 +44,13 @@ export default function Spares() {
   const [spares, setSpares] = useState([]);
   const [machines, setMachines] = useState([]);
   const [ledgerTxns, setLedgerTxns] = useState([]);
+  const [ledgerPagination, setLedgerPagination] = useState({
+    page: 1,
+    limit: 50,
+    total: 0,
+    pages: 0
+  });
+  const [ledgerLoading, setLedgerLoading] = useState(false);
   const [summaryData, setSummaryData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -109,24 +116,29 @@ export default function Spares() {
     setError('');
 
     try {
-      const [sparesData, machinesData, ledgerData, summaryRes] = await Promise.all([
+      const [sparesData, machinesData, ledgerResult, summaryRes] = await Promise.all([
         spareService.getSpares({ limit: 300 }),
         machineService.getAllMachines(),
-        spareService.getLedger({ limit: 100 }),
+        spareService.getLedger({
+          page: 1,
+          limit: 50,
+          spareId: ledgerPartFilter
+        }),
         spareService.getSummary()
       ]);
 
-      setSpares(sparesData || []);
-      setMachines(machinesData || []);
-      setLedgerTxns(ledgerData || []);
-      setSummaryData(summaryRes || null);
+      setSpares(sparesData);
+      setMachines(machinesData);
+      setLedgerTxns(ledgerResult.data);
+      setLedgerPagination(ledgerResult.pagination);
+      setSummaryData(summaryRes);
     } catch (err) {
       setError(err.message || 'Failed to load spare parts data');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [ledgerPartFilter]);
 
   useEffect(() => {
     fetchData();
@@ -139,14 +151,12 @@ export default function Spares() {
     let lowStock = 0;
     let outOfStock = 0;
 
-    spares.forEach((s) => {
-      const stock = s.stock ?? s.quantity ?? 0;
-      const min = s.minStock ?? s.min ?? 0;
-      if (stock <= 0) {
+    spares.forEach((spare) => {
+      if (spare.stockStatus === 'Out') {
         outOfStock++;
-      } else if (stock <= min) {
+      } else if (spare.stockStatus === 'Low') {
         lowStock++;
-      } else {
+      } else if (spare.stockStatus === 'OK') {
         inStock++;
       }
     });
@@ -159,43 +169,17 @@ export default function Spares() {
     };
   }, [spares, summaryData]);
 
-  // Helper map: spareId -> last transactions
-  const spareLastTxnMap = useMemo(() => {
-    const map = {};
-    spares.forEach((s) => {
-      map[s._id] = { lastUsed: null, lastRestocked: null };
-    });
-
-    ledgerTxns.forEach((t) => {
-      const sId = String(t.spare?._id || t.spare || '');
-      if (map[sId]) {
-        const isOut = t.type === 'OUT' || t.transactionType === 'OUT';
-        const dateVal = t.transactionAt || t.createdAt;
-
-        if (isOut && !map[sId].lastUsed) {
-          map[sId].lastUsed = dateVal;
-        } else if (!isOut && !map[sId].lastRestocked) {
-          map[sId].lastRestocked = dateVal;
-        }
-      }
-    });
-
-    return map;
-  }, [spares, ledgerTxns]);
-
   // Filtered spares for stock table
   const filteredSpares = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
 
     return spares.filter((s) => {
-      const name = (s.name || s.partName || '').toLowerCase();
-      const code = (s.code || s.partCode || '').toLowerCase();
-      const stock = s.stock ?? s.quantity ?? 0;
-      const min = s.minStock ?? s.min ?? 0;
+      const name = (s.name ?? s.partName ?? '').toLowerCase();
+      const code = (s.code ?? s.partCode ?? '').toLowerCase();
 
       const machineCodes = (s.machines || []).map((m) => {
         const mObj = m.machine || m;
-        return (mObj.code || mObj.name || '').toLowerCase();
+        return (mObj.code ?? mObj.name ?? '').toLowerCase();
       });
 
       const matchesSearch =
@@ -206,25 +190,33 @@ export default function Spares() {
 
       if (!matchesSearch) return false;
 
-      if (statusFilter === 'ok') return stock > min;
-      if (statusFilter === 'low') return stock > 0 && stock <= min;
-      if (statusFilter === 'out') return stock <= 0;
+      if (statusFilter === 'ok') return s.stockStatus === 'OK';
+      if (statusFilter === 'low') return s.stockStatus === 'Low';
+      if (statusFilter === 'out') return s.stockStatus === 'Out';
 
       return true;
     });
   }, [spares, searchQuery, statusFilter]);
 
-  // Filtered ledger rows
-  const filteredLedger = useMemo(() => {
-    if (ledgerPartFilter === 'all') return ledgerTxns.slice(0, 50);
+  const loadLedgerPage = async (page, spareId = ledgerPartFilter) => {
+    setLedgerLoading(true);
+    try {
+      const result = await spareService.getLedger({
+        page,
+        limit: ledgerPagination.limit,
+        spareId
+      });
+      setLedgerTxns(result.data);
+      setLedgerPagination(result.pagination);
+      setError('');
+    } catch (err) {
+      setError(err.message || 'Failed to load stock ledger.');
+    } finally {
+      setLedgerLoading(false);
+    }
+  };
 
-    return ledgerTxns
-      .filter((t) => {
-        const sId = String(t.spare?._id || t.spare || '');
-        return sId === String(ledgerPartFilter);
-      })
-      .slice(0, 50);
-  }, [ledgerTxns, ledgerPartFilter]);
+  const filteredLedger = ledgerTxns;
 
   // Open Edit Modal
   const handleOpenEditModal = (spare) => {
@@ -236,13 +228,13 @@ export default function Spares() {
     });
 
     setEditForm({
-      name: spare.name || spare.partName || '',
-      code: spare.code || spare.partCode || '',
-      category: spare.category || 'Mechanical',
-      minStock: spare.minStock ?? spare.min ?? 2,
-      maxStock: spare.maxStock ?? spare.max ?? 10,
-      unit: spare.unit || 'Nos',
-      location: spare.location || '',
+      name: spare.name ?? spare.partName ?? '',
+      code: spare.code ?? spare.partCode ?? '',
+      category: spare.category ?? '',
+      minStock: spare.minStock ?? '',
+      maxStock: spare.maxStock ?? '',
+      unit: spare.unit ?? '',
+      location: spare.location ?? '',
       machineSelections
     });
 
@@ -421,9 +413,9 @@ export default function Spares() {
         name: name.trim(),
         code: code.trim().toUpperCase(),
         category,
-        stock: Number(stock) || 0,
-        minStock: Number(minStock) || 0,
-        maxStock: Number(maxStock) || 10,
+        stock: Number(stock),
+        minStock: Number(minStock),
+        maxStock: Number(maxStock),
         unit: unit || 'Nos',
         location: location.trim(),
         machineIds: selectedMIds
@@ -608,45 +600,45 @@ export default function Spares() {
                 </tr>
               ) : (
                 filteredSpares.map((spare) => {
-                  const stock = spare.stock ?? spare.quantity ?? 0;
-                  const min = spare.minStock ?? spare.min ?? 0;
-                  const max = spare.maxStock ?? spare.max ?? (min ? min * 3 : 10);
-                  const isOut = stock <= 0;
-                  const isLow = !isOut && stock <= min;
-                  const statusClass = isOut ? 'out' : isLow ? 'low' : 'ok';
-                  const statusLabel = isOut ? 'Out' : isLow ? 'Low' : 'OK';
-
-                  // Level percentage
-                  const levelPct = Math.min(100, Math.max(10, Math.round((stock / max) * 100)));
+                  const stock = spare.stock;
+                  const min = spare.minStock;
+                  const max = spare.maxStock;
+                  const statusLabel = spare.stockStatus ?? '—';
+                  const statusClass = statusLabel === 'Out'
+                    ? 'out'
+                    : statusLabel === 'Low'
+                      ? 'low'
+                      : statusLabel === 'OK'
+                        ? 'ok'
+                        : 'unknown';
+                  const levelPct = Number.isFinite(stock) && Number.isFinite(max) && max > 0
+                    ? Math.min(100, Math.max(0, Math.round((stock / max) * 100)))
+                    : 0;
 
                   // Machines list
                   const fits = (spare.machines || []).map((m) => {
                     const mObj = m.machine || m;
-                    return mObj.code || mObj.name || String(mObj);
+                    return mObj.code ?? mObj.name ?? '—';
                   });
-
-                  // Last transactions
-                  const lastUsedDate = spareLastTxnMap[spare._id]?.lastUsed || spare.lastUsed;
-                  const lastRestockedDate = spareLastTxnMap[spare._id]?.lastRestocked || spare.lastRestocked;
 
                   return (
                     <tr key={spare._id}>
                       {/* PART */}
                       <td>
                         <div className="part-info">
-                          <span className="part-name">{spare.name || spare.partName}</span>
-                          <span className="part-code">{spare.code || spare.partCode}</span>
+                          <span className="part-name">{spare.name ?? spare.partName ?? '—'}</span>
+                          <span className="part-code">{spare.code ?? spare.partCode ?? '—'}</span>
                         </div>
                       </td>
 
                       {/* STOCK */}
                       <td style={{ textAlign: 'center' }}>
-                        <span className="stock-number">{stock}</span>
+                        <span className="stock-number">{stock ?? '—'}</span>
                       </td>
 
                       {/* MIN */}
                       <td style={{ textAlign: 'center' }}>
-                        <span className="min-number">{min}</span>
+                        <span className="min-number">{min ?? '—'}</span>
                       </td>
 
                       {/* LEVEL PROGRESS BAR */}
@@ -683,12 +675,12 @@ export default function Spares() {
 
                       {/* LAST USED */}
                       <td>
-                        <span className="date-cell-text">{formatDate(lastUsedDate)}</span>
+                        <span className="date-cell-text">{formatDate(spare.lastUsed)}</span>
                       </td>
 
                       {/* LAST RESTOCKED */}
                       <td>
-                        <span className="date-cell-text">{formatDate(lastRestockedDate)}</span>
+                        <span className="date-cell-text">{formatDate(spare.lastRestocked)}</span>
                       </td>
 
                       {/* ACTIONS COLUMN: EDIT & MANAGE STOCK */}
@@ -728,7 +720,7 @@ export default function Spares() {
               <option value="all">All parts</option>
               {spares.map((s) => (
                 <option key={s._id} value={s._id}>
-                  {s.name || s.partName}
+                  {s.name ?? s.partName ?? '—'}
                 </option>
               ))}
             </select>
@@ -752,18 +744,19 @@ export default function Spares() {
               {filteredLedger.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="table-state-cell">
-                    No stock transactions recorded yet.
+                    {ledgerLoading ? 'Loading stock transactions...' : 'No stock transactions recorded.'}
                   </td>
                 </tr>
               ) : (
                 filteredLedger.map((txn, idx) => {
-                  const isOut = txn.type === 'OUT' || txn.transactionType === 'OUT';
-                  const partName = txn.partName || txn.spare?.name || txn.sparePart?.partName || 'Spare Part';
-                  const performedBy = txn.performedByName || txn.performedBy?.name || 'Storekeeper';
+                  const isOut = txn.type === 'OUT';
+                  const partName = txn.spare?.name ?? txn.spare?.code ??
+                    (typeof txn.spare === 'string' ? txn.spare : '—');
+                  const performedBy = txn.performedByName ?? txn.performedBy?.name ?? '—';
 
                   return (
                     <tr key={txn._id || idx}>
-                      <td>{formatDateTime(txn.transactionAt || txn.createdAt)}</td>
+                      <td>{formatDateTime(txn.transactionAt)}</td>
                       <td className="ledger-part-name">{partName}</td>
                       <td style={{ textAlign: 'center' }}>
                         <span className={`txn-badge ${isOut ? 'out' : 'in'}`}>
@@ -776,7 +769,7 @@ export default function Spares() {
                         </span>
                       </td>
                       <td style={{ textAlign: 'center', fontWeight: 600 }}>{txn.balanceAfter}</td>
-                      <td className="ledger-reason-text">{txn.reason || (isOut ? 'Used in maintenance' : 'Stock received')}</td>
+                      <td className="ledger-reason-text">{txn.reason ?? '—'}</td>
                       <td className="ledger-doneby-text">{performedBy}</td>
                     </tr>
                   );
@@ -784,6 +777,27 @@ export default function Spares() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="ledger-pagination" aria-live="polite">
+          <span>
+            {ledgerPagination.total} transactions · Page {ledgerPagination.pages === 0 ? 0 : ledgerPagination.page} of {ledgerPagination.pages}
+          </span>
+          <div className="ledger-pagination-actions">
+            <button
+              type="button"
+              onClick={() => loadLedgerPage(ledgerPagination.page - 1)}
+              disabled={ledgerLoading || ledgerPagination.page <= 1}
+            >
+              Previous
+            </button>
+            <button
+              type="button"
+              onClick={() => loadLedgerPage(ledgerPagination.page + 1)}
+              disabled={ledgerLoading || ledgerPagination.page >= ledgerPagination.pages}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1130,28 +1144,32 @@ export default function Spares() {
                     <div className="stock-level-display">
                       <span className="stock-display-label">CURRENT INVENTORY</span>
                       <div className="stock-display-value-wrap">
-                        <span className="stock-display-val">{editingSpare.stock ?? 0}</span>
-                        <span className="stock-display-unit">{editingSpare.unit || 'Nos'}</span>
+                        <span className="stock-display-val">{editingSpare.stock ?? '—'}</span>
+                        <span className="stock-display-unit">{editingSpare.unit ?? '—'}</span>
                         <span
                           className={`status-pill ${
-                            (editingSpare.stock ?? 0) <= 0
+                            editingSpare.stock === undefined || editingSpare.minStock === undefined
+                              ? 'unknown'
+                              : editingSpare.stock <= 0
                               ? 'out'
-                              : (editingSpare.stock ?? 0) <= (editingSpare.minStock ?? 0)
+                              : editingSpare.stock <= editingSpare.minStock
                               ? 'low'
                               : 'ok'
                           }`}
                         >
                           <span className="dot-indicator">●</span>{' '}
-                          {(editingSpare.stock ?? 0) <= 0
-                            ? 'Out of Stock'
-                            : (editingSpare.stock ?? 0) <= (editingSpare.minStock ?? 0)
-                            ? 'Low Stock'
-                            : 'In Stock'}
+                          {editingSpare.stock === undefined || editingSpare.minStock === undefined
+                            ? 'Unknown'
+                            : editingSpare.stock <= 0
+                              ? 'Out of Stock'
+                              : editingSpare.stock <= editingSpare.minStock
+                                ? 'Low Stock'
+                                : 'In Stock'}
                         </span>
                       </div>
                     </div>
                     <div className="stock-min-hint">
-                      Min Threshold: <b>{editingSpare.minStock ?? 0}</b> | Max: <b>{editingSpare.maxStock ?? 10}</b>
+                      Min Threshold: <b>{editingSpare.minStock ?? '—'}</b> | Max: <b>{editingSpare.maxStock ?? '—'}</b>
                     </div>
                   </div>
 

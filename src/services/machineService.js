@@ -39,7 +39,17 @@ export const machineService = {
    */
   async getAllMachines() {
     const res = await request('');
-    return res.data || [];
+    const machineIds = new Set();
+    const hasInvalidMachine = Array.isArray(res.data) && res.data.some((machine) => {
+      const id = String(machine._id || '');
+      if (!id || machineIds.has(id) || !Number.isInteger(machine.spareCount)) return true;
+      machineIds.add(id);
+      return false;
+    });
+    if (!Array.isArray(res.data) || Number(res.count) !== res.data.length || hasInvalidMachine) {
+      throw new Error('Backend returned an incomplete machine list.');
+    }
+    return res.data;
   },
 
   /**
@@ -88,4 +98,3 @@ export const machineService = {
 };
 
 export default machineService;
-
